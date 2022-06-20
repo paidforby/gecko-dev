@@ -85,6 +85,11 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
       return this;
     }
 
+    public @NonNull Builder rootCertificate(final @Nullable String rootCertificate) {
+      getSettings().mRootCertificate = rootCertificate;
+      return this;
+    }
+
     /**
      * Set whether JavaScript support should be enabled.
      *
@@ -459,6 +464,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
   /* package */ String[] mArgs;
   /* package */ Bundle mExtras;
   /* package */ String mConfigFilePath;
+  /* package */ String mRootCertificate;
 
   /* package */ ContentBlocking.Settings mContentBlocking;
 
@@ -568,11 +574,13 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     mCrashHandler = settings.mCrashHandler;
     mRequestedLocales = settings.mRequestedLocales;
     mConfigFilePath = settings.mConfigFilePath;
+    mRootCertificate = settings.mRootCertificate;
     mTelemetryProxy = settings.mTelemetryProxy;
   }
 
   /* package */ void commit() {
     commitLocales();
+    commitRootCertificate();
     commitResetPrefs();
   }
 
@@ -606,6 +614,10 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
    */
   public @Nullable String getConfigFilePath() {
     return mConfigFilePath;
+  }
+
+  public @Nullable String getRootCertificate() {
+    return mRootCertificate;
   }
 
   /**
@@ -775,6 +787,17 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     data.putStringArray("requestedLocales", mRequestedLocales);
     data.putString("acceptLanguages", computeAcceptLanguages());
     EventDispatcher.getInstance().dispatch("GeckoView:SetLocale", data);
+  }
+
+  public void setRootCertificate(final @Nullable String rootCertificate) {
+    mRootCertificate = rootCertificate;
+    commitRootCertificate();
+  }
+
+  private void commitRootCertificate() {
+    final GeckoBundle data = new GeckoBundle(1);
+    data.putString("rootCertificate", mRootCertificate);
+    EventDispatcher.getInstance().dispatch("GeckoView:AddRootCertificate", data);
   }
 
   private String computeAcceptLanguages() {
@@ -1255,6 +1278,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
     out.writeString(mCrashHandler != null ? mCrashHandler.getName() : null);
     out.writeStringArray(mRequestedLocales);
     out.writeString(mConfigFilePath);
+    out.writeString(mRootCertificate);
   }
 
   // AIDL code may call readFromParcel even though it's not part of Parcelable.
@@ -1286,6 +1310,7 @@ public final class GeckoRuntimeSettings extends RuntimeSettings {
 
     mRequestedLocales = source.createStringArray();
     mConfigFilePath = source.readString();
+    mRootCertificate = source.readString();
   }
 
   public static final Parcelable.Creator<GeckoRuntimeSettings> CREATOR =

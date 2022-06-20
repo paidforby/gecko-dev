@@ -14,14 +14,30 @@ const { GeckoViewUtils } = ChromeUtils.import(
 
 const lazy = {};
 
+XPCOMUtils.defineLazyServiceGetters(lazy, {
+  gCertDB: ["@mozilla.org/security/x509certdb;1", "nsIX509CertDB"]
+});
+
 XPCOMUtils.defineLazyModuleGetters(lazy, {
   ActorManagerParent: "resource://gre/modules/ActorManagerParent.jsm",
+  FileUtils: "resource://gre/modules/FileUtils.jsm",
   EventDispatcher: "resource://gre/modules/Messaging.jsm",
   Preferences: "resource://gre/modules/Preferences.jsm",
   Services: "resource://gre/modules/Services.jsm",
 });
 
 const { debug, warn } = GeckoViewUtils.initLogging("Startup");
+
+XPCOMUtils.defineLazyGetter(lazy, "log", () => {
+  let { ConsoleAPI } = ChromeUtils.import("resource://gre/modules/Console.jsm");
+  return new ConsoleAPI({
+    prefix: "Policies.jsm",
+    // tip: set maxLogLevel to "debug" and use log.debug() to create detailed
+    // messages during development. See LOG_LEVELS in Console.jsm for details.
+    maxLogLevel: "error",
+    maxLogLevelPref: "error",
+  });
+});
 
 var { DelayedInit } = ChromeUtils.import(
   "resource://gre/modules/DelayedInit.jsm"
@@ -212,6 +228,7 @@ class GeckoViewStartup {
           "GeckoView:ResetUserPrefs",
           "GeckoView:SetDefaultPrefs",
           "GeckoView:SetLocale",
+          "GeckoView:InstallCertFile",
         ]);
 
         lazy.Services.obs.addObserver(
@@ -270,6 +287,85 @@ class GeckoViewStartup {
         );
         break;
 
+      case "GeckoView:AddRootCertificate":
+        (async () => {
+          let certfilename = aData.rootCertificate;
+          if (certfilename == "") {
+            return;
+          }
+          lazy.log.debug(`Installing cert file - ${certfilename}`);
+          let certfile;
+          try {
+            certfile = Cc["@mozilla.org/file/local;1"].createInstance(
+              Ci.nsIFile
+            );
+            certfile.initWithPath(certfilename);
+          } catch (e) {
+            lazy.log.error(`Unable to init certfile - ${certfilename}: ${e}`);
+          }
+          let file;
+          try {
+            file = await File.createFromNsIFile(certfile);
+          } catch (e) {
+            lazy.log.error(`Unable to find certificate - ${certfilename}`);
+            return;
+          }
+          let reader = new FileReader();
+          reader.onloadend = function() {
+            if (reader.readyState != reader.DONE) {
+              lazy.log.error(`Unable to read certificate - ${certfile.path}`);
+              return;
+            }
+            let certFile = reader.result;
+            let certFileArray = [];
+            for (let i = 0; i < certFile.length; i++) {
+              certFileArray.push(certFile.charCodeAt(i));
+            }
+            let cert;
+            try {
+              cert = lazy.gCertDB.constructX509(certFileArray);
+            } catch (e) {
+              try {
+                // It might be PEM instead of DER.
+                cert = lazy.gCertDB.constructX509FromBase64(
+                  pemToBase64(certFile)
+                );
+              } catch (ex) {
+                lazy.log.error(
+                  `Unable to add certificate - ${certfile.path}`,
+                  ex
+                );
+              }
+            }
+            if (cert) {
+              if (
+                lazy.gCertDB.isCertTrusted(
+                  cert,
+                  Ci.nsIX509Cert.CA_CERT,
+                  Ci.nsIX509CertDB.TRUSTED_SSL
+                )
+              ) {
+                // Certificate is already installed.
+                lazy.log.debug(`Cert is already installed: ${certFile}`)
+                return;
+              }
+              try {
+                lazy.gCertDB.addCert(certFile, "CT,CT,");
+              } catch (e) {
+                // It might be PEM instead of DER.
+                lazy.gCertDB.addCertFromBase64(
+                  pemToBase64(certFile),
+                  "CT,CT,"
+                );
+              }
+            }
+          };
+          reader.readAsBinaryString(file);
+          }
+        )();
+        break;
+
+
       case "GeckoView:StorageDelegate:Attached":
         InitLater(() => {
           const loginDetection = Cc[
@@ -280,6 +376,13 @@ class GeckoViewStartup {
         break;
     }
   }
+}
+
+function pemToBase64(pem) {
+  return pem
+    .replace(/(.*)-----BEGIN CERTIFICATE-----/, "")
+    .replace(/-----END CERTIFICATE-----(.*)/, "")
+    .replace(/[\r\n]/g, "");
 }
 
 GeckoViewStartup.prototype.classID = Components.ID(
