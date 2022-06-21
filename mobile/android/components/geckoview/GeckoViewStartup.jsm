@@ -228,7 +228,7 @@ class GeckoViewStartup {
           "GeckoView:ResetUserPrefs",
           "GeckoView:SetDefaultPrefs",
           "GeckoView:SetLocale",
-          "GeckoView:InstallCertFile",
+          "GeckoView:AddRootCertificate",
         ]);
 
         lazy.Services.obs.addObserver(
